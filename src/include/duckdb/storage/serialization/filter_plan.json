@@ -8,20 +8,25 @@
       {
         "id": 200,
         "name": "build",
-        "type": "vector<Expression*>"
+        "type": "vector<ColumnBinding>"
       },
       {
         "id": 201,
         "name": "apply",
-        "type": "vector<Expression*>"
+        "type": "vector<ColumnBinding>"
       },
       {
         "id": 202,
+        "name": "return_types",
+        "type": "vector<LogicalType>"
+      },
+      {
+        "id": 203,
         "name": "bound_cols_build",
         "type": "vector<idx_t>"
       },
       {
-        "id": 203,
+        "id": 204,
         "name": "bound_cols_apply",
         "type": "vector<idx_t>"
       }

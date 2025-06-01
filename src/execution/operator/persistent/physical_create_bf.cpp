@@ -60,6 +60,8 @@ public:
 			for (idx_t j = 0; j < plan->build.size(); ++j) {
 				auto &expr = plan->build[j];
 				auto &bound_col_idx = plan->bound_cols_build[j];
+				auto &type = plan->return_types[j];
+
 				if (col_to_expr.count(bound_col_idx)) {
 					continue;
 				}
@@ -68,7 +70,8 @@ public:
 				for (auto &aggr : aggr_functions) {
 					FunctionBinder function_binder(context);
 					vector<unique_ptr<Expression>> aggr_children;
-					aggr_children.push_back(expr->Copy());
+					auto bound_col_expr = make_uniq<BoundColumnRefExpression>(type, expr);
+					aggr_children.push_back(std::move(bound_col_expr));
 					auto aggr_expr = function_binder.BindAggregateFunction(aggr, std::move(aggr_children), nullptr,
 					                                                       AggregateType::NON_DISTINCT);
 					min_max_aggregates.push_back(std::move(aggr_expr));

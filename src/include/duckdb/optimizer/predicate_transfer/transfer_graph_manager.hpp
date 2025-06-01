@@ -10,13 +10,13 @@ namespace duckdb {
 
 class EdgeInfo {
 public:
-	EdgeInfo(unique_ptr<Expression> condition, LogicalOperator &left, const ColumnBinding &left_binding,
-	         LogicalOperator &right, const ColumnBinding &right_binding)
-	    : condition(std::move(condition)), left_table(left), left_binding(left_binding), right_table(right),
+	EdgeInfo(const LogicalType &type, LogicalOperator &left, const ColumnBinding &left_binding, LogicalOperator &right,
+	         const ColumnBinding &right_binding)
+	    : return_type(type), left_table(left), left_binding(left_binding), right_table(right),
 	      right_binding(right_binding) {
 	}
 
-	unique_ptr<Expression> condition;
+	LogicalType return_type;
 
 	LogicalOperator &left_table;
 	ColumnBinding left_binding;
@@ -44,6 +44,7 @@ public:
 
 private:
 	void ExtractEdgesInfo(const vector<reference<LogicalOperator>> &join_operators);
+	// void CreatePineTree();
 	void CreatePredicateTransferGraph();
 	void LargestRoot(vector<LogicalOperator *> &sorted_nodes);
 
@@ -54,7 +55,16 @@ private:
 	void IgnoreUnfilteredTable();
 
 private:
-	unordered_map<idx_t, unordered_map<idx_t, vector<shared_ptr<EdgeInfo>>>> neighbor_matrix;
+	unordered_map<idx_t, unordered_map<idx_t, shared_ptr<EdgeInfo>>> neighbor_matrix;
 	vector<shared_ptr<EdgeInfo>> selected_edges;
+
+	// Join Key Table Groups
+	// Todo: replace set with unordered set
+	// struct HashFunc {
+	// 	size_t operator()(const ColumnBinding &key) const {
+	// 		return std::hash<uint64_t> {}(key.table_index) ^ (std::hash<uint64_t> {}(key.column_index) << 1);
+	// 	}
+	// };
+	// unordered_map<ColumnBinding, shared_ptr<set<idx_t>>, HashFunc> join_keys_table_groups;
 };
 } // namespace duckdb

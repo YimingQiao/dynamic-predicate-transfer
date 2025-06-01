@@ -14,8 +14,9 @@
 namespace duckdb {
 
 struct FilterPlan {
-	vector<unique_ptr<Expression>> build;
-	vector<unique_ptr<Expression>> apply;
+	vector<ColumnBinding> build;
+	vector<ColumnBinding> apply;
+	vector<LogicalType> return_types;
 
 	vector<idx_t> bound_cols_build;
 	vector<idx_t> bound_cols_apply;
@@ -33,7 +34,9 @@ public:
 
 	idx_t destination;
 
-	vector<Expression *> conditions;
+	vector<ColumnBinding> left;
+	vector<ColumnBinding> right;
+	vector<LogicalType> return_types;
 	vector<shared_ptr<FilterPlan>> filter_plan;
 };
 
@@ -57,7 +60,8 @@ public:
 
 public:
 	GraphEdge *Add(idx_t other, bool is_forward, bool is_in_edge);
-	GraphEdge *Add(idx_t other, Expression *expression, bool is_forward, bool is_in_edge);
+	GraphEdge *Add(idx_t other, const vector<ColumnBinding> &left_cols, const vector<ColumnBinding> &right_cols,
+	               const vector<LogicalType> &types, bool is_forward, bool is_in_edge);
 	GraphEdge *Add(idx_t other, const shared_ptr<FilterPlan> &filter_plan, bool is_forward, bool is_in_edge);
 };
 

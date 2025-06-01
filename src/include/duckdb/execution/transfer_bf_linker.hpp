@@ -46,10 +46,14 @@ protected:
 		size_t operator()(const FilterPlan *fp) const {
 			hash_t hash = 0;
 			for (const auto &expr : fp->build) {
-				hash = CombineHash(hash, expr->Hash());
+				size_t expr_hash =
+				    std::hash<uint64_t> {}(expr.table_index) ^ (std::hash<uint64_t> {}(expr.column_index) << 1);
+				hash = CombineHash(hash, expr_hash);
 			}
 			for (const auto &expr : fp->apply) {
-				hash = CombineHash(hash, expr->Hash());
+				size_t expr_hash =
+				    std::hash<uint64_t> {}(expr.table_index) ^ (std::hash<uint64_t> {}(expr.column_index) << 1);
+				hash = CombineHash(hash, expr_hash);
 			}
 			return hash;
 		}

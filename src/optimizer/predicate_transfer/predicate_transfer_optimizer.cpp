@@ -188,23 +188,23 @@ void PredicateTransferOptimizer::GetAllBFsToCreate(idx_t cur_node_id,
 		auto bf_plan = make_shared_ptr<FilterPlan>();
 
 		// Each expression leads to a bloom filter on a column on this table
-		for (auto &expr : edge->conditions) {
-			vector<BoundColumnRefExpression *> expressions;
-			GetColumnBindingExpression(*expr, expressions);
-			D_ASSERT(expressions.size() == 2);
+		idx_t size = edge->left.size();
+		for (idx_t i = 0; i < size; ++i) {
+			auto &left_binding = edge->left[i];
+			auto &right_binding = edge->right[i];
+			auto &return_type = edge->return_types[i];
 
-			auto binding0 = graph_manager.table_operator_manager.GetRenaming(expressions[0]->binding);
-			auto binding1 = graph_manager.table_operator_manager.GetRenaming(expressions[1]->binding);
+			bf_plan->return_types.push_back(return_type);
 
-			expressions[0]->binding = binding0;
-			expressions[1]->binding = binding1;
+			auto binding0 = graph_manager.table_operator_manager.GetRenaming(left_binding);
+			auto binding1 = graph_manager.table_operator_manager.GetRenaming(right_binding);
 
 			if (binding0.table_index == cur_node_id) {
-				bf_plan->build.push_back(expressions[0]->Copy());
-				bf_plan->apply.push_back(expressions[1]->Copy());
+				bf_plan->build.push_back(binding0);
+				bf_plan->apply.push_back(binding1);
 			} else if (binding1.table_index == cur_node_id) {
-				bf_plan->build.push_back(expressions[1]->Copy());
-				bf_plan->apply.push_back(expressions[0]->Copy());
+				bf_plan->build.push_back(binding1);
+				bf_plan->apply.push_back(binding0);
 			}
 		}
 		if (!bf_plan->build.empty()) {

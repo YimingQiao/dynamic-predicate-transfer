@@ -12,7 +12,7 @@ PhysicalOperator &PhysicalPlanGenerator::CreatePlan(LogicalUseBF &op) {
 	size_t target_idx = std::numeric_limits<size_t>::max();
 	for (size_t i = 0; i < bf_creator->filter_plans.size(); i++) {
 		auto &filter_plan = bf_creator->filter_plans[i];
-		if (Expression::ListEquals(filter_plan->apply, bf_plan->apply)) {
+		if (filter_plan->apply == bf_plan->apply) {
 			target_idx = i;
 			break; // Found the target, exit loop
 		}

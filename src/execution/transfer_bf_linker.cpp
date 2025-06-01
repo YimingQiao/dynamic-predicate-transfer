@@ -91,9 +91,8 @@ void TransferBFLinker::VisitOperator(LogicalOperator &op) {
 			auto &bf_user = op.Cast<LogicalUseBF>();
 
 			bool all_numerical = true;
-			for (auto &expr : bf_user.filter_plan->apply) {
-				auto &col_binding = expr->Cast<BoundColumnRefExpression>();
-				if (!col_binding.return_type.IsNumeric()) {
+			for (auto &type : bf_user.filter_plan->return_types) {
+				if (!type.IsNumeric()) {
 					all_numerical = false;
 					break;
 				}
@@ -103,7 +102,7 @@ void TransferBFLinker::VisitOperator(LogicalOperator &op) {
 				vector<ColumnBinding> updated_bindings;
 				shared_ptr<DynamicTableFilterSet> filter_set = nullptr;
 				for (auto &expr : bf_user.filter_plan->apply) {
-					auto &binding = expr->Cast<BoundColumnRefExpression>().binding;
+					auto &binding = expr;
 					updated_bindings.push_back(binding);
 				}
 				UpdateMinMaxBinding(*bf_user.children[0], updated_bindings, filter_set);

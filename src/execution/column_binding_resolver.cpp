@@ -25,7 +25,7 @@ void ColumnBindingResolver::VisitOperator(LogicalOperator &op) {
 		for (auto &bf_plan : create_bf.filter_plans) {
 			bf_plan->bound_cols_build.clear();
 			for (auto &col : bf_plan->build) {
-				auto &col_bind = col->Cast<BoundColumnRefExpression>().binding;
+				auto &col_bind = col;
 				for (idx_t i = 0; i < bindings.size(); i++) {
 					if (col_bind == bindings[i]) {
 						bf_plan->bound_cols_build.push_back(i);
@@ -34,7 +34,7 @@ void ColumnBindingResolver::VisitOperator(LogicalOperator &op) {
 				}
 			}
 			if (bf_plan->bound_cols_build.size() != bf_plan->build.size()) {
-				throw InternalException("Failed to bind column reference.\n");
+				throw InternalException("Predicate Transfer: Failed to bind column reference.\n");
 			}
 		}
 		bindings = op.GetColumnBindings();
@@ -47,7 +47,7 @@ void ColumnBindingResolver::VisitOperator(LogicalOperator &op) {
 		auto &bf_plan = use_bf.filter_plan;
 		bf_plan->bound_cols_apply.clear();
 		for (auto &col : bf_plan->apply) {
-			auto &col_bind = col->Cast<BoundColumnRefExpression>().binding;
+			auto &col_bind = col;
 			for (idx_t i = 0; i < bindings.size(); i++) {
 				if (col_bind == bindings[i]) {
 					bf_plan->bound_cols_apply.push_back(i);
@@ -56,7 +56,7 @@ void ColumnBindingResolver::VisitOperator(LogicalOperator &op) {
 			}
 		}
 		if (bf_plan->bound_cols_apply.size() != bf_plan->apply.size()) {
-			throw InternalException("Failed to bind column reference.\n");
+			throw InternalException("Predicate Transfer: Failed to bind column reference.\n");
 		}
 
 		bindings = op.GetColumnBindings();
