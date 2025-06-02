@@ -34,6 +34,7 @@ public:
 
 	idx_t destination;
 
+	// The left is the smaller table side, while the right is the bigger table side
 	vector<ColumnBinding> left;
 	vector<ColumnBinding> right;
 	vector<LogicalType> return_types;
@@ -47,11 +48,11 @@ struct Edges {
 
 class GraphNode {
 public:
-	GraphNode(idx_t id, int32_t priority) : id(id), priority(priority) {
+	GraphNode(idx_t id, int32_t priority) : id(id), cardinality_order(priority) {
 	}
 
 	idx_t id;
-	int32_t priority;
+	int32_t cardinality_order;
 
 	//! Predicate Transfer has two stages. The transfer graph is different because of the existence of LEFT JOIN, RIGHT
 	//! JOIN, etc.

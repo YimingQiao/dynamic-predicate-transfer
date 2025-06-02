@@ -44,27 +44,49 @@ public:
 
 private:
 	void ExtractEdgesInfo(const vector<reference<LogicalOperator>> &join_operators);
-	// void CreatePineTree();
-	void CreatePredicateTransferGraph();
+	void CreateTransferPlan();
 	void LargestRoot(vector<LogicalOperator *> &sorted_nodes);
 
 	pair<idx_t, idx_t> FindEdge(const unordered_set<idx_t> &constructed_set,
 	                            const unordered_set<idx_t> &unconstructed_set);
 
 private:
-	void IgnoreUnfilteredTable();
+	//! Classify all tables into three categories: intermediate table, unfiltered table, and filtered table.
+	void ClassifyTables();
+	void SkipUnfilteredTable();
+
+	// Join Key Table Groups
+	struct JoinKeyTableGroup {
+		LogicalType return_type;
+		unordered_set<idx_t> table_ids;
+
+		JoinKeyTableGroup(const LogicalType &return_type, const idx_t table_id) : return_type(return_type) {
+			table_ids.insert(table_id);
+		}
+
+		void Union(const JoinKeyTableGroup &other) {
+			D_ASSERT(return_type == other.return_type);
+			table_ids.insert(other.table_ids.begin(), other.table_ids.end());
+		}
+	};
+
+	struct HashFunc {
+		size_t operator()(const ColumnBinding &key) const {
+			return std::hash<uint64_t> {}(key.table_index) ^ (std::hash<uint64_t> {}(key.column_index) << 1);
+		}
+	};
+
+	//! From table id to its join keys
+	unordered_map<idx_t, vector<ColumnBinding>> table_join_keys;
+	//! From join keys to its table groups
+	unordered_map<ColumnBinding, shared_ptr<JoinKeyTableGroup>, HashFunc> table_groups;
+    //! Table categories
+	unordered_set<idx_t> unfiltered_table;
+	unordered_set<idx_t> filtered_table;
+	unordered_set<idx_t> intermediate_table;
 
 private:
 	unordered_map<idx_t, unordered_map<idx_t, shared_ptr<EdgeInfo>>> neighbor_matrix;
 	vector<shared_ptr<EdgeInfo>> selected_edges;
-
-	// Join Key Table Groups
-	// Todo: replace set with unordered set
-	// struct HashFunc {
-	// 	size_t operator()(const ColumnBinding &key) const {
-	// 		return std::hash<uint64_t> {}(key.table_index) ^ (std::hash<uint64_t> {}(key.column_index) << 1);
-	// 	}
-	// };
-	// unordered_map<ColumnBinding, shared_ptr<set<idx_t>>, HashFunc> join_keys_table_groups;
 };
 } // namespace duckdb
