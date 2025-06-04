@@ -71,6 +71,8 @@ public:
 		return true;
 	}
 
+	ProgressData GetProgress(ClientContext &context, GlobalSourceState &gstate) const override;
+
 public:
 	// Sink interface
 	SinkResultType Sink(ExecutionContext &context, DataChunk &chunk, OperatorSinkInput &input) const override;

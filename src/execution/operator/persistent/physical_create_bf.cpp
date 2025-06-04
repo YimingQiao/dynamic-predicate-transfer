@@ -496,6 +496,15 @@ void PhysicalCreateBF::BuildPipelinesFromRelated(Pipeline &current, MetaPipeline
 	}
 }
 
+ProgressData PhysicalCreateBF::GetProgress(ClientContext &context, GlobalSourceState &gstate) const {
+	auto &source_state = gstate.Cast<CreateBFGlobalSourceState>();
+
+	ProgressData res;
+	res.done = static_cast<double>(source_state.global_scan_state.scan_state.current_row_index);
+	res.total = static_cast<double>(source_state.data_collection.Count());
+	return res;
+}
+
 void PhysicalCreateBF::BuildPipelines(Pipeline &current, MetaPipeline &meta_pipeline) {
 	op_state.reset();
 
