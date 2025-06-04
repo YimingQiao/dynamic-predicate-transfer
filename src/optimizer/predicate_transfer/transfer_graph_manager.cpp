@@ -9,6 +9,43 @@
 #include <queue>
 
 namespace duckdb {
+static ColumnBinding FindBindingRoot(const ColumnBinding &binding, BindingParentMap &parents) {
+	auto it = parents.find(binding);
+	if (it == parents.end()) {
+		return binding;
+	}
+	ColumnBinding root = it->second;
+	if (root != binding) {
+		root = FindBindingRoot(root, parents);
+		parents[binding] = root; // Path compression
+	}
+	return root;
+}
+
+static void UnionBindings(const ColumnBinding &a, const ColumnBinding &b, const LogicalType &type,
+                          BindingParentMap &parents, BindingGroupMap &group_map) {
+	ColumnBinding root_a = FindBindingRoot(a, parents);
+	ColumnBinding root_b = FindBindingRoot(b, parents);
+	if (root_a == root_b) {
+		return;
+	}
+
+	// Union by attaching b to a
+	parents[root_b] = root_a;
+
+	auto &group_a = group_map[root_a];
+	if (!group_a) {
+		group_a = make_shared_ptr<JoinKeyTableGroup>(type, a.table_index);
+	}
+
+	auto &group_b = group_map[root_b];
+	if (!group_b) {
+		group_b = make_shared_ptr<JoinKeyTableGroup>(type, b.table_index);
+	}
+
+	group_a->Union(*group_b);
+	group_map[root_a] = group_a;
+}
 
 bool TransferGraphManager::Build(LogicalOperator &plan) {
 	// 1. Extract all operators, including table operators and join operators
@@ -23,11 +60,16 @@ bool TransferGraphManager::Build(LogicalOperator &plan) {
 		return false;
 	}
 
-	// 2.5 Remove Bloom filter creation for unfiltered tables
-	IgnoreUnfilteredTable();
+	// 3. Unfiltered Table only receives Bloom filters, they will not generate Bloom filters.
+	SkipUnfilteredTable();
 
-	// 3. Create the transfer graph
-	CreatePredicateTransferGraph();
+	// 4. Create the transfer graph
+	CreateSimplifiedTransferPlan();
+	// CreateOriginTransferPlan();
+
+	// (Optional) Show the transfer plan
+	// PrintTransferPlan();
+
 	return true;
 }
 
@@ -40,14 +82,96 @@ void TransferGraphManager::AddFilterPlan(idx_t create_table, const shared_ptr<Fi
 	transfer_graph[node_idx]->Add(create_table, filter_plan, is_forward, true);
 }
 
+void TransferGraphManager::PrintTransferPlan() {
+	// Output table groups
+	unordered_set<JoinKeyTableGroup *> visited;
+	for (auto &pair : table_groups) {
+		auto &group = pair.second;
+		if (visited.count(group.get())) {
+			continue;
+		}
+		visited.insert(group.get());
+		group->Print();
+	}
+
+	// Local helper to get operator name
+	auto GetName = [](LogicalOperator &op) -> string {
+		string ret;
+		auto params = op.ParamsToString();
+
+		if (params.contains("Table")) {
+			ret = params.at("Table");
+		} else {
+			ret = "Unknown";
+		}
+
+		if (op.type == LogicalOperatorType::LOGICAL_GET) {
+			auto &get = op.Cast<LogicalGet>();
+			if (get.table_filters.filters.empty()) {
+				ret += " (No Filter)";
+			}
+		}
+		return ret;
+	};
+
+	std::cout << "digraph G {" << '\n';
+
+	// Create a map to store outgoing neighbors for each LogicalOperator
+	std::unordered_map<std::string, std::vector<std::pair<std::string, std::pair<int, int>>>> outgoing_neighbors;
+
+	// Populate the outgoing_neighbors map by traversing the edges
+	for (const auto &edge : selected_edges) {
+		std::string left_name = GetName(edge->left_table);
+		std::string right_name = GetName(edge->right_table);
+		idx_t left_column_id = edge->left_binding.column_index;   // Get the column id for the left table
+		idx_t right_column_id = edge->right_binding.column_index; // Get the column id for the right table
+
+		// Check the protection flags and only allow outgoing edges if the table is not protected
+		if (!edge->protect_right) {
+			outgoing_neighbors[left_name].emplace_back(right_name, std::make_pair(left_column_id, right_column_id));
+		}
+		if (!edge->protect_left) {
+			outgoing_neighbors[right_name].emplace_back(left_name, std::make_pair(right_column_id, left_column_id));
+		}
+	}
+
+	// Output nodes (LogicalOperators) and their outgoing neighbors (edges)
+	for (const auto &op : transfer_order) {
+		std::string op_name = GetName(*op); // Use GetName function for operator name
+		std::cout << "\t\"" << op_name << "\";\n";
+
+		// Output edges to each neighbor (only outgoing edges)
+		if (outgoing_neighbors.find(op_name) != outgoing_neighbors.end()) {
+			for (const auto &neighbor : outgoing_neighbors[op_name]) {
+				std::string neighbor_name = neighbor.first;
+				int left_column_id = neighbor.second.first;
+				int right_column_id = neighbor.second.second;
+
+				// Print edge with column ids
+				std::cout << "\t\t\"" << op_name << "\" -> \"" << neighbor_name << "\" [label=\"Column "
+				          << left_column_id << " -> Column " << right_column_id << "\"];\n";
+			}
+		}
+	}
+
+	std::cout << "}"
+	          << "\n";
+}
+
 void TransferGraphManager::ExtractEdgesInfo(const vector<reference<LogicalOperator>> &join_operators) {
+	// Deduplicate join conditions
 	unordered_set<hash_t> existed_set;
 	auto ComputeConditionHash = [](const JoinCondition &cond) {
 		return cond.left->Hash() + cond.right->Hash();
 	};
 
-	for (size_t i = 0; i < join_operators.size(); i++) {
-		auto &join = join_operators[i].get();
+	// Union-Find structures
+	BindingParentMap binding_parents;
+	BindingGroupMap group_map;
+
+	for (auto &join_ref : join_operators) {
+		auto &join = join_ref.get();
+
 		if (join.type != LogicalOperatorType::LOGICAL_COMPARISON_JOIN &&
 		    join.type != LogicalOperatorType::LOGICAL_DELIM_JOIN) {
 			continue;
@@ -56,25 +180,27 @@ void TransferGraphManager::ExtractEdgesInfo(const vector<reference<LogicalOperat
 		auto &comp_join = join.Cast<LogicalComparisonJoin>();
 		D_ASSERT(comp_join.expressions.empty());
 
-		for (size_t j = 0; j < comp_join.conditions.size(); j++) {
-			auto &cond = comp_join.conditions[j];
+		for (auto &cond : comp_join.conditions) {
+			// Only equal predicates between two column refs are supported
 			if (cond.comparison != ExpressionType::COMPARE_EQUAL ||
 			    cond.left->type != ExpressionType::BOUND_COLUMN_REF ||
 			    cond.right->type != ExpressionType::BOUND_COLUMN_REF) {
 				continue;
 			}
 
+			// Skip duplicate conditions
 			hash_t hash = ComputeConditionHash(cond);
 			if (!existed_set.insert(hash).second) {
 				continue;
 			}
 
-			auto &left_col_expression = cond.left->Cast<BoundColumnRefExpression>();
-			ColumnBinding left_binding = table_operator_manager.GetRenaming(left_col_expression.binding);
-			auto left_node = table_operator_manager.GetTableOperator(left_binding.table_index);
+			auto &left_expr = cond.left->Cast<BoundColumnRefExpression>();
+			auto &right_expr = cond.right->Cast<BoundColumnRefExpression>();
 
-			auto &right_col_expression = cond.right->Cast<BoundColumnRefExpression>();
-			ColumnBinding right_binding = table_operator_manager.GetRenaming(right_col_expression.binding);
+			ColumnBinding left_binding = table_operator_manager.GetRenaming(left_expr.binding);
+			ColumnBinding right_binding = table_operator_manager.GetRenaming(right_expr.binding);
+
+			auto left_node = table_operator_manager.GetTableOperator(left_binding.table_index);
 			auto right_node = table_operator_manager.GetTableOperator(right_binding.table_index);
 
 			if (!left_node || !right_node) {
@@ -85,57 +211,59 @@ void TransferGraphManager::ExtractEdgesInfo(const vector<reference<LogicalOperat
 			auto edge =
 			    make_shared_ptr<EdgeInfo>(cond.left->return_type, *left_node, left_binding, *right_node, right_binding);
 
-			// Set protection flags
+			// Set edge protection flags based on join type
 			switch (comp_join.type) {
-			case LogicalOperatorType::LOGICAL_COMPARISON_JOIN: {
-				if (comp_join.join_type == JoinType::LEFT) {
+			case LogicalOperatorType::LOGICAL_COMPARISON_JOIN:
+				switch (comp_join.join_type) {
+				case JoinType::LEFT:
 					edge->protect_left = true;
-				} else if (comp_join.join_type == JoinType::MARK) {
+					break;
+				case JoinType::RIGHT:
 					edge->protect_right = true;
-				} else if (comp_join.join_type == JoinType::RIGHT) {
+					break;
+				case JoinType::MARK:
 					edge->protect_right = true;
-				} else if (comp_join.join_type != JoinType::INNER && comp_join.join_type != JoinType::SEMI &&
-				           comp_join.join_type != JoinType::RIGHT_SEMI) {
-					continue; // Unsupported join type
+					break;
+				case JoinType::INNER:
+				case JoinType::SEMI:
+				case JoinType::RIGHT_SEMI:
+					break;
+				default:
+					continue; // Skip unsupported types
 				}
 				break;
-			}
-			case LogicalOperatorType::LOGICAL_DELIM_JOIN: {
+
+			case LogicalOperatorType::LOGICAL_DELIM_JOIN:
 				if (comp_join.delim_flipped == 0) {
 					edge->protect_left = true;
 				} else {
 					edge->protect_right = true;
 				}
 				break;
-			}
+
 			default:
 				continue;
 			}
 
-			// Store edge info
+			// Store bidirectional edge
 			neighbor_matrix[left_binding.table_index][right_binding.table_index] = edge;
 			neighbor_matrix[right_binding.table_index][left_binding.table_index] = edge;
 
-			// The left table and right table belong to the same table group
+			// Merge groups if not protected
 			if (!edge->protect_left && !edge->protect_right) {
-				auto &group_left = table_groups[left_binding];
-				if (group_left == nullptr) {
-					group_left =
-					    make_shared_ptr<JoinKeyTableGroup>(left_col_expression.return_type, left_binding.table_index);
-				}
-
-				auto &group_right = table_groups[right_binding];
-				if (group_right == nullptr) {
-					group_right =
-					    make_shared_ptr<JoinKeyTableGroup>(right_col_expression.return_type, right_binding.table_index);
-				}
-
-				// union groups
-				group_left->Union(*group_right);
-				table_groups[right_binding] = group_left;
+				UnionBindings(left_binding, right_binding, cond.left->return_type, binding_parents, group_map);
 			}
 		}
 	}
+
+	// Finalize table_groups by resolving root bindings
+	for (auto &entry : group_map) {
+		ColumnBinding rep = FindBindingRoot(entry.first, binding_parents);
+		table_groups[entry.first] = group_map[rep];
+	}
+
+	// Classify all tables into three categories: intermediate table, unfiltered table, and filtered table.
+	ClassifyTables();
 }
 
 void TransferGraphManager::ClassifyTables() {
@@ -143,22 +271,24 @@ void TransferGraphManager::ClassifyTables() {
 		auto id = pair.first;
 		auto &table = pair.second;
 		auto &edges = neighbor_matrix[id];
+		auto &join_keys = table_join_keys[id];
 
 		// Check intermediate table, which belongs to more than 2 groups
-		bool is_intermediate = false;
 		unordered_set<JoinKeyTableGroup *> belong_groups;
 		for (auto &sub_pair : edges) {
 			auto &edge = sub_pair.second;
 			auto &join_key_group = table_groups[edge->left_binding];
 			belong_groups.insert(join_key_group.get());
 
-			if (belong_groups.size() > 1) {
-				is_intermediate = true;
-				intermediate_table.insert(id);
-				break;
+			// Record all join keys of this table
+			if (edge->left_binding.table_index == id) {
+				join_keys.insert(edge->left_binding);
+			} else {
+				join_keys.insert(edge->right_binding);
 			}
 		}
-		if (is_intermediate) {
+		if (belong_groups.size() > 1) {
+			intermediate_table.insert(id);
 			continue;
 		}
 
@@ -177,9 +307,6 @@ void TransferGraphManager::ClassifyTables() {
 }
 
 void TransferGraphManager::SkipUnfilteredTable() {
-	// 1. Classify Tables
-	ClassifyTables();
-
 	bool changed = false;
 	do {
 		changed = false;
@@ -200,7 +327,7 @@ void TransferGraphManager::SkipUnfilteredTable() {
 				}
 			}
 
-			// 2.2 remove BFs creation for this table
+			// 2.2 remove BFs creation from this table
 			for (auto &pair : edges) {
 				auto &edge = pair.second;
 
@@ -214,14 +341,14 @@ void TransferGraphManager::SkipUnfilteredTable() {
 				auto &bfs = received_bfs[col_idx];
 
 				// 2.2.1 add new links
-				for (auto &bf_link : bfs) {
+				for (auto &bf_edge : bfs) {
 					// the same edge
-					if (bf_link->left_binding == edge->left_binding && bf_link->right_binding == edge->right_binding) {
+					if (bf_edge->left_binding == edge->left_binding && bf_edge->right_binding == edge->right_binding) {
 						continue;
 					}
 
-					bool bf_left = (bf_link->left_binding.table_index == table_idx && !bf_link->protect_left);
-					bool bf_right = (bf_link->right_binding.table_index == table_idx && !bf_link->protect_right);
+					bool bf_left = (bf_edge->left_binding.table_index == table_idx && !bf_edge->protect_left);
+					bool bf_right = (bf_edge->right_binding.table_index == table_idx && !bf_edge->protect_right);
 					if (!bf_left && !bf_right) {
 						continue;
 					}
@@ -229,21 +356,21 @@ void TransferGraphManager::SkipUnfilteredTable() {
 					shared_ptr<EdgeInfo> concat_edge = nullptr;
 					if (is_left && bf_left) {
 						concat_edge =
-						    make_shared_ptr<EdgeInfo>(edge->return_type, bf_link->right_table, bf_link->right_binding,
+						    make_shared_ptr<EdgeInfo>(edge->return_type, bf_edge->right_table, bf_edge->right_binding,
 						                              edge->right_table, edge->right_binding);
 						concat_edge->protect_left = true;
 					} else if (is_left && bf_right) {
 						concat_edge =
-						    make_shared_ptr<EdgeInfo>(edge->return_type, bf_link->left_table, bf_link->left_binding,
+						    make_shared_ptr<EdgeInfo>(edge->return_type, bf_edge->left_table, bf_edge->left_binding,
 						                              edge->right_table, edge->right_binding);
 						concat_edge->protect_left = true;
 					} else if (is_right && bf_left) {
 						concat_edge = make_shared_ptr<EdgeInfo>(edge->return_type, edge->left_table, edge->left_binding,
-						                                        bf_link->right_table, bf_link->right_binding);
+						                                        bf_edge->right_table, bf_edge->right_binding);
 						concat_edge->protect_right = true;
 					} else if (is_right && bf_right) {
 						concat_edge = make_shared_ptr<EdgeInfo>(edge->return_type, edge->left_table, edge->left_binding,
-						                                        bf_link->left_table, bf_link->left_binding);
+						                                        bf_edge->left_table, bf_edge->left_binding);
 						concat_edge->protect_right = true;
 					}
 
@@ -327,6 +454,12 @@ void TransferGraphManager::LargestRoot(vector<LogicalOperator *> &sorted_nodes) 
 	// Add root
 	transfer_order.push_back(table_operator_manager.GetTableOperator(root));
 	table_operator_manager.table_operators.erase(root);
+	for (auto &col_binding : table_join_keys[root]) {
+		auto &group = table_groups[col_binding];
+		if (group) {
+			group->RegisterLeader(root, col_binding);
+		}
+	}
 
 	// Build graph
 	while (!unconstructed_set.empty()) {
@@ -343,12 +476,19 @@ void TransferGraphManager::LargestRoot(vector<LogicalOperator *> &sorted_nodes) 
 
 		transfer_order.push_back(table_operator_manager.GetTableOperator(node->id));
 		table_operator_manager.table_operators.erase(node->id);
+		for (auto &col_binding : table_join_keys[node->id]) {
+			auto &group = table_groups[col_binding];
+			if (group) {
+				group->RegisterLeader(node->id, col_binding);
+			}
+		}
+
 		unconstructed_set.erase(selected_edge.second);
 		constructed_set.insert(selected_edge.second);
 	}
 }
 
-void TransferGraphManager::CreateTransferPlan() {
+void TransferGraphManager::CreateOriginTransferPlan() {
 	auto saved_nodes = table_operator_manager.table_operators;
 	while (!table_operator_manager.table_operators.empty()) {
 		LargestRoot(table_operator_manager.sorted_table_operators);
@@ -367,8 +507,57 @@ void TransferGraphManager::CreateTransferPlan() {
 		D_ASSERT(left_idx != std::numeric_limits<idx_t>::max() && right_idx != std::numeric_limits<idx_t>::max());
 
 		auto &type = edge->return_type;
-		auto left_node = transfer_graph[right_idx].get();
-		auto right_node = transfer_graph[left_idx].get();
+		auto left_node = transfer_graph[left_idx].get();
+		auto right_node = transfer_graph[right_idx].get();
+
+		auto left_cols = edge->left_binding;
+		auto right_cols = edge->right_binding;
+
+		auto protect_left = edge->protect_left;
+		auto protect_right = edge->protect_right;
+
+		// smaller table is in the left
+		if (left_node->cardinality_order > right_node->cardinality_order) {
+			std::swap(left_node, right_node);
+			std::swap(left_cols, right_cols);
+			std::swap(protect_left, protect_right);
+		}
+
+		// forward: from the smaller to the larger
+		if (!protect_right) {
+			left_node->Add(right_node->id, {left_cols}, {right_cols}, {type}, true, false);
+			right_node->Add(left_node->id, {left_cols}, {right_cols}, {type}, true, true);
+		}
+
+		// backward: from the larger to the smaller
+		if (!protect_left) {
+			left_node->Add(right_node->id, {left_cols}, {right_cols}, {type}, false, true);
+			right_node->Add(left_node->id, {left_cols}, {right_cols}, {type}, false, false);
+		}
+	}
+}
+
+void TransferGraphManager::CreateSimplifiedTransferPlan() {
+	auto saved_nodes = table_operator_manager.table_operators;
+	while (!table_operator_manager.table_operators.empty()) {
+		LargestRoot(table_operator_manager.sorted_table_operators);
+		table_operator_manager.SortTableOperators();
+	}
+	table_operator_manager.table_operators = saved_nodes;
+
+	for (auto &edge : selected_edges) {
+		if (!edge) {
+			continue;
+		}
+
+		idx_t left_idx = TableOperatorManager::GetScalarTableIndex(&edge->left_table);
+		idx_t right_idx = TableOperatorManager::GetScalarTableIndex(&edge->right_table);
+
+		D_ASSERT(left_idx != std::numeric_limits<idx_t>::max() && right_idx != std::numeric_limits<idx_t>::max());
+
+		auto &type = edge->return_type;
+		auto left_node = transfer_graph[left_idx].get();
+		auto right_node = transfer_graph[right_idx].get();
 
 		auto &left_cols = edge->left_binding;
 		auto &right_cols = edge->right_binding;
@@ -384,15 +573,25 @@ void TransferGraphManager::CreateTransferPlan() {
 		}
 
 		// forward: from the smaller to the larger
-		if (!protect_left) {
+		if (!protect_right) {
 			left_node->Add(right_node->id, {left_cols}, {right_cols}, {type}, true, false);
 			right_node->Add(left_node->id, {left_cols}, {right_cols}, {type}, true, true);
 		}
 
 		// backward: from the larger to the smaller
-		if (!protect_right) {
-			left_node->Add(right_node->id, {left_cols}, {right_cols}, {type}, false, true);
-			right_node->Add(left_node->id, {left_cols}, {right_cols}, {type}, false, false);
+		if (!protect_left) {
+			auto &group = table_groups[right_cols];
+			if (group) {
+				auto group_leader = group->leader_id;
+				auto &leader_cols = group->leader_column_binding;
+				auto leader = transfer_graph[group_leader].get();
+
+				left_node->Add(group_leader, {left_cols}, {leader_cols}, {type}, false, true);
+				leader->Add(left_node->id, {left_cols}, {leader_cols}, {type}, false, false);
+			} else {
+				left_node->Add(right_node->id, {left_cols}, {right_cols}, {type}, false, true);
+				right_node->Add(left_node->id, {left_cols}, {right_cols}, {type}, false, false);
+			}
 		}
 	}
 }
