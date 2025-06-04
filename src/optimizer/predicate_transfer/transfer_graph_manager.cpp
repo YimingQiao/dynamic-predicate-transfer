@@ -64,11 +64,7 @@ bool TransferGraphManager::Build(LogicalOperator &plan) {
 	SkipUnfilteredTable();
 
 	// 4. Create the transfer graph
-	CreateSimplifiedTransferPlan();
-	// CreateOriginTransferPlan();
-
-	// (Optional) Show the transfer plan
-	// PrintTransferPlan();
+	CreateTransferPlanUpdated();
 
 	return true;
 }
@@ -454,6 +450,64 @@ void TransferGraphManager::LargestRoot(vector<LogicalOperator *> &sorted_nodes) 
 	// Add root
 	transfer_order.push_back(table_operator_manager.GetTableOperator(root));
 	table_operator_manager.table_operators.erase(root);
+
+	// Build graph
+	while (!unconstructed_set.empty()) {
+		auto selected_edge = FindEdge(constructed_set, unconstructed_set);
+		if (selected_edge.first == std::numeric_limits<idx_t>::max()) {
+			break;
+		}
+
+		auto &edge = neighbor_matrix[selected_edge.first][selected_edge.second];
+		selected_edges.emplace_back(std::move(edge));
+
+		auto node = transfer_graph[selected_edge.second].get();
+		node->cardinality_order = prior_flag--;
+
+		transfer_order.push_back(table_operator_manager.GetTableOperator(node->id));
+		table_operator_manager.table_operators.erase(node->id);
+
+		unconstructed_set.erase(selected_edge.second);
+		constructed_set.insert(selected_edge.second);
+	}
+}
+void TransferGraphManager::LargestRootUpdated(vector<LogicalOperator *> &sorted_nodes) {
+	unordered_set<idx_t> constructed_set, unconstructed_set;
+	int prior_flag = static_cast<int>(table_operator_manager.table_operators.size()) - 1;
+	idx_t root = std::numeric_limits<idx_t>::max();
+
+	// Try to choose the largest filtered or intermediate table as the root
+	for (auto it = sorted_nodes.rbegin(); it != sorted_nodes.rend(); ++it) {
+		auto& node = *it;
+		auto id = table_operator_manager.GetScalarTableIndex(node);
+		if (filtered_table.count(id) || intermediate_table.count(id)) {
+			root = id;
+			break;
+		}
+	}
+
+	// If we cannot find it, use the largest table as the root
+	if (root == std::numeric_limits<idx_t>::max()) {
+		auto& node = sorted_nodes.back();
+		root = table_operator_manager.GetScalarTableIndex(node);
+	}
+
+	// Initialize nodes
+	for (auto &entry : table_operator_manager.table_operators) {
+		idx_t id = entry.first;
+		if (id == root) {
+			constructed_set.insert(id);
+		} else {
+			unconstructed_set.insert(id);
+		}
+
+		auto node = make_uniq<GraphNode>(id, prior_flag--);
+		transfer_graph[id] = std::move(node);
+	}
+
+	// Add root
+	transfer_order.push_back(table_operator_manager.GetTableOperator(root));
+	table_operator_manager.table_operators.erase(root);
 	for (auto &col_binding : table_join_keys[root]) {
 		auto &group = table_groups[col_binding];
 		if (group) {
@@ -486,6 +540,7 @@ void TransferGraphManager::LargestRoot(vector<LogicalOperator *> &sorted_nodes) 
 		unconstructed_set.erase(selected_edge.second);
 		constructed_set.insert(selected_edge.second);
 	}
+
 }
 
 void TransferGraphManager::CreateOriginTransferPlan() {
@@ -537,10 +592,10 @@ void TransferGraphManager::CreateOriginTransferPlan() {
 	}
 }
 
-void TransferGraphManager::CreateSimplifiedTransferPlan() {
+void TransferGraphManager::CreateTransferPlanUpdated() {
 	auto saved_nodes = table_operator_manager.table_operators;
 	while (!table_operator_manager.table_operators.empty()) {
-		LargestRoot(table_operator_manager.sorted_table_operators);
+		LargestRootUpdated(table_operator_manager.sorted_table_operators);
 		table_operator_manager.SortTableOperators();
 	}
 	table_operator_manager.table_operators = saved_nodes;

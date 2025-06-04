@@ -92,8 +92,9 @@ public:
 private:
 	void ExtractEdgesInfo(const vector<reference<LogicalOperator>> &join_operators);
 	void CreateOriginTransferPlan();
-	void CreateSimplifiedTransferPlan();
+	void CreateTransferPlanUpdated();
 	void LargestRoot(vector<LogicalOperator *> &sorted_nodes);
+	void LargestRootUpdated(vector<LogicalOperator *> &sorted_nodes);
 
 	pair<idx_t, idx_t> FindEdge(const unordered_set<idx_t> &constructed_set,
 	                            const unordered_set<idx_t> &unconstructed_set);

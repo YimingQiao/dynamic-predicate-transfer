@@ -195,7 +195,7 @@ bool PhysicalCreateBF::GiveUpBFCreation(const DataChunk &chunk, OperatorSinkInpu
 	auto &lstate = input.local_state.Cast<CreateBFLocalSinkState>();
 	auto &gstate = input.global_state.Cast<CreateBFGlobalSinkState>();
 
-	// Early Stop: OOM
+	// Stop: OOM
 	if (lstate.local_data->AllocationSize() + chunk.GetAllocationSize() >=
 	    lstate.temporary_memory_state->GetReservation()) {
 		is_successful = false;
@@ -209,6 +209,12 @@ bool PhysicalCreateBF::GiveUpBFCreation(const DataChunk &chunk, OperatorSinkInpu
 
 		if (this_pipeline->num_source_chunks > 32) {
 			gstate.is_selectivity_checked = true;
+
+			// 0. Since one Bloom filter is already created from this table, we believe it is worthy to create the
+			// second, because the second bloom filter is only created in the backward stage and is to be distributed.
+			if (gstate.op.this_pipeline->GetSource()->type == PhysicalOperatorType::CREATE_BF) {
+				return false;
+			}
 
 			// 1. Check the selectivity: a high selectivity means that the base table is not filtered. It is not
 			// beneficial to build a BF on a full table.
@@ -500,8 +506,10 @@ ProgressData PhysicalCreateBF::GetProgress(ClientContext &context, GlobalSourceS
 	auto &source_state = gstate.Cast<CreateBFGlobalSourceState>();
 
 	ProgressData res;
-	res.done = static_cast<double>(source_state.global_scan_state.scan_state.current_row_index);
 	res.total = static_cast<double>(source_state.data_collection.Count());
+
+	lock_guard<mutex> guard(source_state.global_scan_state.lock);
+	res.done = static_cast<double>(source_state.global_scan_state.scan_state.current_row_index);
 	return res;
 }
 
