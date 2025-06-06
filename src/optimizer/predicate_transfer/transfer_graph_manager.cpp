@@ -64,7 +64,7 @@ bool TransferGraphManager::Build(LogicalOperator &plan) {
 	SkipUnfilteredTable();
 
 	// 4. Create the transfer graph
-	CreateOriginTransferPlan();
+	CreateTransferPlanUpdated();
 
 	return true;
 }
