@@ -613,8 +613,8 @@ void TransferGraphManager::CreateTransferPlanUpdated() {
 		auto left_node = transfer_graph[left_idx].get();
 		auto right_node = transfer_graph[right_idx].get();
 
-		auto &left_cols = edge->left_binding;
-		auto &right_cols = edge->right_binding;
+		auto left_cols = edge->left_binding;
+		auto right_cols = edge->right_binding;
 
 		auto protect_left = edge->protect_left;
 		auto protect_right = edge->protect_right;
