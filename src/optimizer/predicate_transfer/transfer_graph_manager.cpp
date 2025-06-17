@@ -654,18 +654,21 @@ pair<idx_t, idx_t> TransferGraphManager::FindEdge(const unordered_set<idx_t> &co
                                                   const unordered_set<idx_t> &unconstructed_set) {
 	pair<idx_t, idx_t> result {std::numeric_limits<idx_t>::max(), std::numeric_limits<idx_t>::max()};
 	idx_t max_cardinality = 0;
+	bool is_indirected = false;
 
 	for (auto i : unconstructed_set) {
 		for (auto j : constructed_set) {
-			auto &edges = neighbor_matrix[j][i];
-			if (edges == nullptr) {
+			auto &edge = neighbor_matrix[j][i];
+			if (edge == nullptr) {
 				continue;
 			}
 
 			idx_t cardinality = table_operator_manager.GetTableOperator(i)->estimated_cardinality;
-			if (cardinality > max_cardinality) {
+			if (cardinality > max_cardinality ||
+			    (is_indirected == false && !edge->protect_left && !edge->protect_right)) {
 				max_cardinality = cardinality;
 				result = {j, i};
+				is_indirected = !edge->protect_left && !edge->protect_right;
 			}
 		}
 	}
