@@ -40,7 +40,7 @@ public:
 			is_checked = true;
 
 			double selectivity = static_cast<double>(num_sent) / static_cast<double>(num_received);
-			if (selectivity > SELECTIVITY_THRESHOLD) {
+			if (selectivity > SELECTIVITY_THRESHOLD && selectivity < 1) {
 				use_bf = false;
 			}
 		}
