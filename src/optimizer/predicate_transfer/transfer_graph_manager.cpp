@@ -302,7 +302,15 @@ void TransferGraphManager::ClassifyTables() {
 	}
 }
 
-void TransferGraphManager::SkipUnfilteredTable() {
+void TransferGraphManager::SkipUnfilteredTable(const vector<reference<LogicalOperator>> &joins) {
+	// TODO: currently, we do not support skip unfiltered tables participating in outer join.
+	for (auto& op: joins) {
+		auto &join = op.get().Cast<LogicalComparisonJoin>();
+		if (join.join_type != JoinType::INNER) {
+			return;
+		}
+	}
+
 	bool changed = false;
 	do {
 		changed = false;

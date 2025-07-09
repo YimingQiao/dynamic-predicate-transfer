@@ -102,7 +102,7 @@ private:
 private:
 	//! Classify all tables into three categories: intermediate table, unfiltered table, and filtered table.
 	void ClassifyTables();
-	void SkipUnfilteredTable();
+	void SkipUnfilteredTable(const vector<reference<LogicalOperator>> &joins);
 
 	//! From table id to its join keys
 	TableJoinKeyMap table_join_keys;
