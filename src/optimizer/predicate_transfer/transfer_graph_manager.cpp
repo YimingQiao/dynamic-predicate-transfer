@@ -61,7 +61,7 @@ bool TransferGraphManager::Build(LogicalOperator &plan) {
 	}
 
 	// 3. Unfiltered Table only receives Bloom filters, they will not generate Bloom filters.
-	SkipUnfilteredTable();
+	SkipUnfilteredTable(joins);
 
 	// 4. Create the transfer graph
 	CreateTransferPlanUpdated();
