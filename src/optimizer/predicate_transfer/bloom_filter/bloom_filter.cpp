@@ -62,7 +62,6 @@ int BloomFilter::Lookup(DataChunk &chunk, vector<uint32_t> &results, const vecto
 void BloomFilter::Insert(DataChunk &chunk, const vector<idx_t> &bound_cols_built) {
 	int count = static_cast<int>(chunk.size());
 	Vector hashes = HashColumns(chunk, bound_cols_built);
-	std::lock_guard<std::mutex> lock(insert_lock);
 	BloomFilterInsert(count, reinterpret_cast<uint64_t *>(hashes.GetData()), blocks);
 }
 } // namespace duckdb
