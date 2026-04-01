@@ -4,7 +4,9 @@ This repository contains the implementation of **Dynamic Predicate Transfer (RPT
 
 Compared to the original Robust Predicate Transfer (RPT), RPT+ introduces several key optimizations. For technical details, please refer to the paper:
 
-> **Robust Predicate Transfer with Dynamic Execution** (PVLDB 2026, to appear) · Yiming Qiao, Peter Boncz, Huanchen Zhang [[Link]](https://yimingqiao.github.io/files/rpt_plus.pdf)
+> **Robust Predicate Transfer with Dynamic Execution** (PVLDB 2026) · Yiming Qiao, Peter Boncz, Huanchen Zhang [[Link]](https://yimingqiao.github.io/files/rpt_plus.pdf)
+
+Recent DuckDB releases v1.5.0 have further improved execution performance, and some optimizations may overlap with or subsume parts of RPT+, reflecting the continued evolution of modern query execution engines.
 
 ## Quick Start
 
