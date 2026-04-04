@@ -238,7 +238,7 @@ bool PhysicalCreateBF::GiveUpBFCreation(const DataChunk &chunk, OperatorSinkInpu
 			}
 #else
 			// For other benchmarks
-			if (selectivity > 0.2) {
+			if (selectivity > 0.35) {
 				is_successful = false;
 				return true;
 			}
