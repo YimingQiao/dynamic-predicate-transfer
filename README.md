@@ -6,7 +6,7 @@ Compared to the original Robust Predicate Transfer (RPT), RPT+ introduces severa
 
 > **Robust Predicate Transfer with Dynamic Execution** (PVLDB 2026) · Yiming Qiao, Peter Boncz, Huanchen Zhang [[Link]](https://yimingqiao.github.io/files/rpt_plus.pdf)
 
-Recent DuckDB releases v1.5.0 have further improved execution performance, and some optimizations may overlap with or subsume parts of RPT+, reflecting the continued evolution of modern query execution engines.
+**Update (2026-04-04):** Fixed a performance issue where the build was missing `-march=native`, causing suboptimal Bloom filter performance. 
 
 ## Quick Start
 
