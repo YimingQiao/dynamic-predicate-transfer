@@ -63,23 +63,31 @@ git apply APPLY_ME_TO_GET_VANILLA_RPT.patch
 
 ## Benchmark
 
-DuckDB includes a built-in implementation of benchmarks. You can build and run them with:
+DuckDB includes a built-in implementation of benchmarks. You can build with 
+
+```bash
+BUILD_BENCHMARK=1 BUILD_TPCH=1 BUILD_TPCDS=1 BUILD_HTTPFS=1 CORE_EXTENSIONS='tpch' make -j$(nproc)
+```
+
+and run them with:
+
+### TPC-H (SF=10)
+```bash
+build/release/benchmark/benchmark_runner "benchmark/large/tpch-sf10/.*.benchmark" --threads=1
+```
 
 ### TPC-H (SF=100)
 ```bash
-BUILD_BENCHMARK=1 BUILD_TPCH=1 BUILD_TPCDS=1 BUILD_HTTPFS=1 CORE_EXTENSIONS='tpch' make -j$(nproc)
 build/release/benchmark/benchmark_runner "benchmark/large/tpch-sf100/.*.benchmark" --threads=8
 ```
 
 ### Join Order Benchmark (JOB)
 ```bash
-BUILD_BENCHMARK=1 BUILD_TPCH=1 BUILD_TPCDS=1 BUILD_HTTPFS=1 CORE_EXTENSIONS='tpch' make -j$(nproc)
 build/release/benchmark/benchmark_runner "benchmark/imdb/.*.benchmark" --threads=8
 ```
 
 ### Appian Benchmark
 ```bash
-BUILD_BENCHMARK=1 BUILD_TPCH=1 BUILD_TPCDS=1 BUILD_HTTPFS=1 CORE_EXTENSIONS='tpch' make -j$(nproc)
 build/release/benchmark/benchmark_runner "benchmark/appian_benchmarks/.*.benchmark" --threads=8
 ```
 
